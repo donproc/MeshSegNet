@@ -14,16 +14,17 @@ import pandas as pd
 if __name__ == '__main__':
 
     torch.cuda.set_device(utils.get_avail_gpu()) # assign which gpu will be used (only linux works)
-    use_visdom = True # if you don't use visdom, please set to False
+    use_visdom = False # if you don't use visdom, please set to False
 
-    train_list = './train_list_1.csv' # use 1-fold as example
-    val_list = './val_list_1.csv' # use 1-fold as example
+    data_folder = '/proj/MeshSegNet'
+    train_list = os.path.join(data_folder, 'train_list_1.csv') # use 1-fold as example
+    val_list = os.path.join(data_folder, 'val_list_1.csv') # use 1-fold as example
 
     model_path = './models/'
     model_name = 'Mesh_Segementation_MeshSegNet_15_classes_60samples' # need to define
     checkpoint_name = 'latest_checkpoint.tar'
 
-    num_classes = 15
+    num_classes = 17
     num_channels = 15 #number of features
     num_epochs = 200
     num_workers = 0
@@ -73,7 +74,7 @@ if __name__ == '__main__':
     torch.backends.cudnn.enabled = True
 
     print('Training model...')
-    class_weights = torch.ones(15).to(device, dtype=torch.float)
+    class_weights = torch.ones(num_classes).to(device, dtype=torch.float)
     for epoch in range(num_epochs):
 
         # training
