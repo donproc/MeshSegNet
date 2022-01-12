@@ -10,12 +10,15 @@ from meshsegnet import *
 from losses_and_metrics_for_mesh import *
 import utils
 import pandas as pd
+from torch.utils.tensorboard import SummaryWriter
+
+
 
 if __name__ == '__main__':
 
     torch.cuda.set_device(utils.get_avail_gpu()) # assign which gpu will be used (only linux works)
     use_visdom = False # if you don't use visdom, please set to False
-
+    writer = SummaryWriter()
     data_folder = '/proj/MeshSegNet'
     train_list = os.path.join(data_folder, 'train_list_1.csv') # use 1-fold as example
     val_list = os.path.join(data_folder, 'val_list_1.csv') # use 1-fold as example
@@ -128,7 +131,10 @@ if __name__ == '__main__':
                 running_mdsc = 0.0
                 running_msen = 0.0
                 running_mppv = 0.0
-
+        writer.add_scalar("Loss/train", loss_epoch, epoch)
+        writer.add_scalar("DSC/train", mdsc_epoch, epoch)
+        writer.add_scalar("SEN/train", msen_epoch, epoch)
+        writer.add_scalar("PPVric/train", mppv_epoch, epoch)
         # record losses and metrics
         losses.append(loss_epoch/len(train_loader))
         mdsc.append(mdsc_epoch/len(train_loader))
@@ -183,6 +189,10 @@ if __name__ == '__main__':
                     running_val_msen = 0.0
                     running_val_mppv = 0.0
 
+            writer.add_scalar("Loss/val", val_loss_epoch, epoch)
+            writer.add_scalar("DSC/val", val_mdsc_epoch, epoch)
+            writer.add_scalar("SEN/val", val_msen_epoch, epoch)
+            writer.add_scalar("PPV/val", val_mppv_epoch, epoch)
             # record losses and metrics
             val_losses.append(val_loss_epoch/len(val_loader))
             val_mdsc.append(val_mdsc_epoch/len(val_loader))
