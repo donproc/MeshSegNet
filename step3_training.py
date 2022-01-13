@@ -11,14 +11,14 @@ from losses_and_metrics_for_mesh import *
 import utils
 import pandas as pd
 from torch.utils.tensorboard import SummaryWriter
-
+import time
 
 
 if __name__ == '__main__':
 
     torch.cuda.set_device(utils.get_avail_gpu()) # assign which gpu will be used (only linux works)
     use_visdom = False # if you don't use visdom, please set to False
-    writer = SummaryWriter()
+    writer = SummaryWriter('runs/meshsegnet_2')
     data_folder = '/proj/MeshSegNet'
     train_list = os.path.join(data_folder, 'train_list_1.csv') # use 1-fold as example
     val_list = os.path.join(data_folder, 'val_list_1.csv') # use 1-fold as example
@@ -79,7 +79,7 @@ if __name__ == '__main__':
     print('Training model...')
     class_weights = torch.ones(num_classes).to(device, dtype=torch.float)
     for epoch in range(num_epochs):
-
+        tic = time.perf_counter()
         # training
         model.train()
         running_loss = 0.0
@@ -127,14 +127,17 @@ if __name__ == '__main__':
                     plotter.plot('DSC', 'train', 'DSC', epoch+(i_batch+1)/len(train_loader), running_mdsc/num_batches_to_print)
                     plotter.plot('SEN', 'train', 'SEN', epoch+(i_batch+1)/len(train_loader), running_msen/num_batches_to_print)
                     plotter.plot('PPV', 'train', 'PPV', epoch+(i_batch+1)/len(train_loader), running_mppv/num_batches_to_print)
+                global_step = epoch * ((len(train_loader) - 1)//num_batches_to_print + 1) + (i_batch-1)/num_batches_to_print + 1
+                print('global_step: {}'.format(global_step))
+                writer.add_scalar("Loss/train", running_loss/num_batches_to_print, global_step)
+                writer.add_scalar("DSC/train", running_mdsc/num_batches_to_print, global_step)
+                writer.add_scalar("SEN/train", running_msen/num_batches_to_print, global_step)
+                writer.add_scalar("PPV/train", running_mppv/num_batches_to_print, global_step)
+                writer.flush()
                 running_loss = 0.0
                 running_mdsc = 0.0
                 running_msen = 0.0
                 running_mppv = 0.0
-        writer.add_scalar("Loss/train", loss_epoch, epoch)
-        writer.add_scalar("DSC/train", mdsc_epoch, epoch)
-        writer.add_scalar("SEN/train", msen_epoch, epoch)
-        writer.add_scalar("PPVric/train", mppv_epoch, epoch)
         # record losses and metrics
         losses.append(loss_epoch/len(train_loader))
         mdsc.append(mdsc_epoch/len(train_loader))
@@ -184,15 +187,18 @@ if __name__ == '__main__':
 
                 if i_batch % num_batches_to_print == num_batches_to_print-1:  # print every N mini-batches
                     print('[Epoch: {0}/{1}, Val batch: {2}/{3}] val_loss: {4}, val_dsc: {5}, val_sen: {6}, val_ppv: {7}'.format(epoch+1, num_epochs, i_batch+1, len(val_loader), running_val_loss/num_batches_to_print, running_val_mdsc/num_batches_to_print, running_val_msen/num_batches_to_print, running_val_mppv/num_batches_to_print))
+                    
+                    global_step = epoch * ((len(val_loader) - 1)//num_batches_to_print + 1) + (i_batch-1)/num_batches_to_print + 1
+
+                    writer.add_scalar("Loss/val", running_val_loss/num_batches_to_print, global_step)
+                    writer.add_scalar("DSC/val", running_val_mdsc/num_batches_to_print, global_step)
+                    writer.add_scalar("SEN/val", running_val_msen/num_batches_to_print, global_step)
+                    writer.add_scalar("PPV/val", running_val_mppv/num_batches_to_print, global_step)
+                    writer.flush()
                     running_val_loss = 0.0
                     running_val_mdsc = 0.0
                     running_val_msen = 0.0
                     running_val_mppv = 0.0
-
-            writer.add_scalar("Loss/val", val_loss_epoch, epoch)
-            writer.add_scalar("DSC/val", val_mdsc_epoch, epoch)
-            writer.add_scalar("SEN/val", val_msen_epoch, epoch)
-            writer.add_scalar("PPV/val", val_mppv_epoch, epoch)
             # record losses and metrics
             val_losses.append(val_loss_epoch/len(val_loader))
             val_mdsc.append(val_mdsc_epoch/len(val_loader))
@@ -251,3 +257,6 @@ if __name__ == '__main__':
         pd_dict = {'loss': losses, 'DSC': mdsc, 'SEN': msen, 'PPV': mppv, 'val_loss': val_losses, 'val_DSC': val_mdsc, 'val_SEN': val_msen, 'val_PPV': val_mppv}
         stat = pd.DataFrame(pd_dict)
         stat.to_csv('losses_metrics_vs_epoch.csv')
+        toc = time.perf_counter()
+        print(f"epoch {epoch} : {toc - tic:0.5f} seconds")
+    writer.close()
