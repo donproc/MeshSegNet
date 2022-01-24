@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 import torch.optim as optim
 import torch.nn as nn
-from Mesh_dataset import *
+from Mesh_dataset_cupy import *
 from meshsegnet import *
 from losses_and_metrics_for_mesh import *
 import utils
@@ -18,18 +18,18 @@ if __name__ == '__main__':
 
     torch.cuda.set_device(utils.get_avail_gpu()) # assign which gpu will be used (only linux works)
     use_visdom = False # if you don't use visdom, please set to False
-    writer = SummaryWriter('runs/meshsegnet_2')
+    writer = SummaryWriter('runs/meshsegnet_7')
     data_folder = '/proj/MeshSegNet'
     train_list = os.path.join(data_folder, 'train_list_1.csv') # use 1-fold as example
     val_list = os.path.join(data_folder, 'val_list_1.csv') # use 1-fold as example
 
     model_path = './models/'
-    model_name = 'Mesh_Segementation_MeshSegNet_15_classes_60samples' # need to define
-    checkpoint_name = 'latest_checkpoint.tar'
+    model_name = 'MeshSegNet_17_classes_800samples_lr' # need to define
+    checkpoint_name = 'latest_checkpoint_lr.tar'
 
     num_classes = 17
     num_channels = 15 #number of features
-    num_epochs = 200
+    num_epochs = 1000
     num_workers = 0
     train_batch_size = 10
     val_batch_size = 10
@@ -55,17 +55,21 @@ if __name__ == '__main__':
     train_loader = DataLoader(dataset=training_dataset,
                               batch_size=train_batch_size,
                               shuffle=True,
-                              num_workers=num_workers)
+                              num_workers=num_workers,
+                              pin_memory=True)
 
     val_loader = DataLoader(dataset=val_dataset,
                             batch_size=val_batch_size,
                             shuffle=False,
-                            num_workers=num_workers)
+                            num_workers=num_workers,
+                            pin_memory=True)
 
     # set model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = MeshSegNet(num_classes=num_classes, num_channels=num_channels, with_dropout=True, dropout_p=0.5).to(device, dtype=torch.float)
-    opt = optim.Adam(model.parameters(), amsgrad=True)
+    opt = optim.AdamW(model.parameters(), amsgrad=True)
+
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=0.01, steps_per_epoch=len(train_loader), epochs=num_epochs)
 
     losses, mdsc, msen, mppv = [], [], [], []
     val_losses, val_mdsc, val_msen, val_mppv = [], [], [], []
@@ -110,6 +114,7 @@ if __name__ == '__main__':
             ppv = weighting_PPV(outputs, one_hot_labels, class_weights)
             loss.backward()
             opt.step()
+            scheduler.step()
 
             # print statistics
             running_loss += loss.item()
@@ -127,12 +132,12 @@ if __name__ == '__main__':
                     plotter.plot('DSC', 'train', 'DSC', epoch+(i_batch+1)/len(train_loader), running_mdsc/num_batches_to_print)
                     plotter.plot('SEN', 'train', 'SEN', epoch+(i_batch+1)/len(train_loader), running_msen/num_batches_to_print)
                     plotter.plot('PPV', 'train', 'PPV', epoch+(i_batch+1)/len(train_loader), running_mppv/num_batches_to_print)
-                global_step = epoch * ((len(train_loader) - 1)//num_batches_to_print + 1) + (i_batch-1)/num_batches_to_print + 1
-                print('global_step: {}'.format(global_step))
-                writer.add_scalar("Loss/train", running_loss/num_batches_to_print, global_step)
-                writer.add_scalar("DSC/train", running_mdsc/num_batches_to_print, global_step)
-                writer.add_scalar("SEN/train", running_msen/num_batches_to_print, global_step)
-                writer.add_scalar("PPV/train", running_mppv/num_batches_to_print, global_step)
+                global_step = epoch * ((len(train_loader) - 1)//num_batches_to_print + 1) + (i_batch)//num_batches_to_print + 1
+                print('[training]global_step: {}'.format(global_step))
+                writer.add_scalar("train/Loss", running_loss/num_batches_to_print, global_step)
+                writer.add_scalar("train/DSC", running_mdsc/num_batches_to_print, global_step)
+                writer.add_scalar("train/SEN", running_msen/num_batches_to_print, global_step)
+                writer.add_scalar("train/PPV", running_mppv/num_batches_to_print, global_step)
                 writer.flush()
                 running_loss = 0.0
                 running_mdsc = 0.0
@@ -185,15 +190,18 @@ if __name__ == '__main__':
                 val_msen_epoch += sen.item()
                 val_mppv_epoch += ppv.item()
 
-                if i_batch % num_batches_to_print == num_batches_to_print-1:  # print every N mini-batches
-                    print('[Epoch: {0}/{1}, Val batch: {2}/{3}] val_loss: {4}, val_dsc: {5}, val_sen: {6}, val_ppv: {7}'.format(epoch+1, num_epochs, i_batch+1, len(val_loader), running_val_loss/num_batches_to_print, running_val_mdsc/num_batches_to_print, running_val_msen/num_batches_to_print, running_val_mppv/num_batches_to_print))
-                    
-                    global_step = epoch * ((len(val_loader) - 1)//num_batches_to_print + 1) + (i_batch-1)/num_batches_to_print + 1
 
-                    writer.add_scalar("Loss/val", running_val_loss/num_batches_to_print, global_step)
-                    writer.add_scalar("DSC/val", running_val_mdsc/num_batches_to_print, global_step)
-                    writer.add_scalar("SEN/val", running_val_msen/num_batches_to_print, global_step)
-                    writer.add_scalar("PPV/val", running_val_mppv/num_batches_to_print, global_step)
+                if i_batch == len(val_loader) - 1:  # print every N mini-batches
+                    # print('[Epoch: {0}/{1}, Val batch: {2}/{3}] val_loss: {4}, val_dsc: {5}, val_sen: {6}, val_ppv: {7}'.format(epoch+1, num_epochs, i_batch+1, len(val_loader), 
+                    # running_val_loss/num_val_batches_to_print, running_val_mdsc/num_val_batches_to_print, running_val_msen/num_val_batches_to_print, running_val_mppv/num_val_batches_to_print))
+                    
+                    # val_global_step = epoch * ((len(val_loader) - 1)//num_val_batches_to_print + 1) + (i_batch)//num_val_batches_to_print + 1
+                    # print('[val]global_step: {}'.format(global_step))
+
+                    writer.add_scalar("val/Loss", running_val_loss/len(val_loader), epoch)
+                    writer.add_scalar("val/DSC", running_val_mdsc/len(val_loader), epoch)
+                    writer.add_scalar("val/SEN", running_val_msen/len(val_loader), epoch)
+                    writer.add_scalar("val/PPV", running_val_mppv/len(val_loader), epoch)
                     writer.flush()
                     running_val_loss = 0.0
                     running_val_mdsc = 0.0

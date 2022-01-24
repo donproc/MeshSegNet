@@ -24,16 +24,18 @@ if __name__ == '__main__':
     # upsampling_method = 'SVM'
     upsampling_method = 'KNN'
 
-    model_path = './models'
-    model_name = 'MeshSegNet_Max_15_classes_72samples_lr1e-2_best.zip'
+    model_path = '/proj/MeshSegNet/models/217'
+    model_name = 'latest_checkpoint_lr.tar'
 
-    mesh_path = './'  # need to modify
-    sample_filenames = ['Example_02.stl'] # need to modify
+    test_csv = '/proj/MeshSegNet/test_list_1.csv'
+    csv_list = pd.read_csv(test_csv)
+    sample_filenames = [csv_list.iloc[6][0]]
+    # sample_filenames = ['/proj/hardcase/case1/lowerTeeth.stl']
     output_path = './outputs'
     if not os.path.exists(output_path):
         os.mkdir(output_path)
 
-    num_classes = 15
+    num_classes = 17    
     num_channels = 15
 
     # set model
@@ -64,7 +66,7 @@ if __name__ == '__main__':
 
             print('Predicting Sample filename: {}'.format(i_sample))
             # read image and label (annotation)
-            mesh = vedo.load(os.path.join(mesh_path, i_sample))
+            mesh = vedo.load(i_sample)
 
             # pre-processing: downsampling
             print('\tDownsampling...')
@@ -157,7 +159,8 @@ if __name__ == '__main__':
             # output downsampled predicted labels
             mesh2 = mesh_d.clone()
             mesh2.addCellArray(predicted_labels_d, 'Label')
-            vedo.write(mesh2, os.path.join(output_path, '{}_d_predicted.vtp'.format(i_sample[:-4])))
+            long_name = i_sample.replace('/', '_')
+            vedo.write(mesh2, os.path.join(output_path, '{}_d_predicted.vtp'.format(long_name)))
 
             # refinement
             print('\tRefining by pygco...')
@@ -206,7 +209,8 @@ if __name__ == '__main__':
             # output refined result
             mesh3 = mesh_d.clone()
             mesh3.addCellArray(refine_labels, 'Label')
-            vedo.write(mesh3, os.path.join(output_path, '{}_d_predicted_refined.vtp'.format(i_sample[:-4])))
+            long_name = i_sample.replace('/', '_')
+            vedo.write(mesh3, os.path.join(output_path, '{}_d_predicted_refined.vtp'.format(long_name)))
 
             # upsampling
             print('\tUpsampling...')
@@ -249,7 +253,8 @@ if __name__ == '__main__':
                 fine_labels = fine_labels.reshape(-1, 1)
 
             mesh.addCellArray(fine_labels, 'Label')
-            vedo.write(mesh, os.path.join(output_path, '{}_predicted_refined.vtp'.format(i_sample[:-4])))
+            long_name = i_sample.replace('/', '_')
+            vedo.write(mesh, os.path.join(output_path, '{}_predicted_refined_upsample.vtp'.format(long_name)))
 
             #remove tmp folder
             shutil.rmtree(tmp_path)

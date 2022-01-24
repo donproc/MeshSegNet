@@ -14,16 +14,21 @@ if __name__ == '__main__':
     gpu_id = 0
     torch.cuda.set_device(gpu_id) # assign which gpu will be used (only linux works)
 
-    model_path = './models'
-    model_name = 'MeshSegNet_Max_15_classes_72samples_lr1e-2_best.tar'
+    model_path = '/proj/MeshSegNet/models/'
+    model_name = 'latest_checkpoint.tar'
 
-    mesh_path = './'  # need to define
-    sample_filenames = ['Example.stl'] # need to define
+    test_csv = '/proj/MeshSegNet/test_list_1.csv'
+    csv_list = pd.read_csv(test_csv)
+    sample_filenames = [csv_list.iloc[16][0]]
+    # sample_filenames = ['/proj/MeshSegNet/upperteeth.vtp']
+
+    # mesh_path = './'  # need to define
+    # sample_filenames = ['Example.stl'] # need to define
     output_path = './outputs'
     if not os.path.exists(output_path):
         os.mkdir(output_path)
 
-    num_classes = 15
+    num_classes = 17
     num_channels = 15
 
     # set model
@@ -46,7 +51,7 @@ if __name__ == '__main__':
         for i_sample in sample_filenames:
 
             print('Predicting Sample filename: {}'.format(i_sample))
-            mesh = vedo.load(os.path.join(mesh_path, i_sample))
+            mesh = vedo.load(i_sample)
 
             # pre-processing: downsampling
             if mesh.NCells() > 10000:
@@ -64,9 +69,9 @@ if __name__ == '__main__':
             print('\tPredicting...')
             cells = np.zeros([mesh_d.NCells(), 9], dtype='float32')
             for i in range(len(cells)):
-                cells[i][0], cells[i][1], cells[i][2] = mesh_d._polydata.GetPoint(mesh_d._polydata.GetCell(i).GetPointId(0)) # don't need to copy
-                cells[i][3], cells[i][4], cells[i][5] = mesh_d._polydata.GetPoint(mesh_d._polydata.GetCell(i).GetPointId(1)) # don't need to copy
-                cells[i][6], cells[i][7], cells[i][8] = mesh_d._polydata.GetPoint(mesh_d._polydata.GetCell(i).GetPointId(2)) # don't need to copy
+                cells[i][0], cells[i][1], cells[i][2] = mesh_d.polydata().GetPoint(mesh_d.polydata().GetCell(i).GetPointId(0)) # don't need to copy
+                cells[i][3], cells[i][4], cells[i][5] = mesh_d.polydata().GetPoint(mesh_d.polydata().GetCell(i).GetPointId(1)) # don't need to copy
+                cells[i][6], cells[i][7], cells[i][8] = mesh_d.polydata().GetPoint(mesh_d.polydata().GetCell(i).GetPointId(2)) # don't need to copy
 
             original_cells_d = cells.copy()
 
@@ -144,6 +149,7 @@ if __name__ == '__main__':
             # output downsampled predicted labels
             mesh2 = mesh_d.clone()
             mesh2.addCellArray(predicted_labels_d, 'Label')
-            vedo.write(mesh2, os.path.join(output_path, '{}_d_predicted.vtp'.format(i_sample[:-4])))
+            long_name = i_sample.replace('/', '_')
+            vedo.write(mesh2, os.path.join(output_path, '{}_d_predicted.vtp'.format(long_name)))
 
             print('Sample filename: {} completed'.format(i_sample))

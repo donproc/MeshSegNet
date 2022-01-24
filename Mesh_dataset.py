@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from vedo import *
 from scipy.spatial import distance_matrix
-
+import time
 class Mesh_Dataset(Dataset):
     def __init__(self, data_list_path, num_classes=15, patch_size=7000):
         """
@@ -25,22 +25,21 @@ class Mesh_Dataset(Dataset):
             idx = idx.tolist()
 
         i_mesh = self.data_list.iloc[idx][0] #vtk file name
-
+        tict = time.perf_counter()
         # read vtk
         mesh = load(i_mesh)
-        labels = mesh.getCellArray('Label').astype('int32').reshape(-1, 1)
 
+        labels = mesh.celldata['Label'].astype('int32').reshape(-1, 1)
         #create one-hot map
 #        label_map = np.zeros([mesh.cells.shape[0], self.num_classes], dtype='int32')
 #        label_map = np.eye(self.num_classes)[labels]
 #        label_map = label_map.reshape([len(labels), self.num_classes])
-
+        
         # move mesh to origin
-        cells = np.zeros([mesh.NCells(), 9], dtype='float32')
-        for i in range(len(cells)):
-            cells[i][0], cells[i][1], cells[i][2] = mesh.polydata().GetPoint(mesh.polydata().GetCell(i).GetPointId(0)) # don't need to copy
-            cells[i][3], cells[i][4], cells[i][5] = mesh.polydata().GetPoint(mesh.polydata().GetCell(i).GetPointId(1)) # don't need to copy
-            cells[i][6], cells[i][7], cells[i][8] = mesh.polydata().GetPoint(mesh.polydata().GetCell(i).GetPointId(2)) # don't need to copy
+        N = mesh.NCells()
+        points = vtk2numpy(mesh.polydata().GetPoints().GetData())
+        ids = vtk2numpy(mesh.polydata().GetPolys().GetData()).reshape((N, -1))[:,1:]
+        cells = points[ids].reshape(N, 9)
 
         mean_cell_centers = mesh.centerOfMass()
         cells[:, 0:3] -= mean_cell_centers[0:3]
@@ -61,12 +60,12 @@ class Mesh_Dataset(Dataset):
         mesh_normals[:, 0] /= mesh_normal_length[:]
         mesh_normals[:, 1] /= mesh_normal_length[:]
         mesh_normals[:, 2] /= mesh_normal_length[:]
-        mesh.addCellArray(mesh_normals, 'Normal')
+        mesh.celldata['Normal'] = mesh_normals
 
         # preprae input and make copies of original data
         points = mesh.points().copy()
         points[:, 0:3] -= mean_cell_centers[0:3]
-        normals = mesh.getCellArray('Normal').copy() # need to copy, they use the same memory address
+        normals = mesh.celldata['Normal'].copy() # need to copy, they use the same memory address
         barycenters = mesh.cellCenters() # don't need to copy
         barycenters -= mean_cell_centers[0:3]
 
@@ -101,8 +100,11 @@ class Mesh_Dataset(Dataset):
         num_positive = len(positive_idx) # number of selected tooth cells
 
         if num_positive > self.patch_size: # all positive_idx in this patch
-            positive_selected_idx = np.random.choice(positive_idx, size=self.patch_size, replace=False)
-            selected_idx = positive_selected_idx
+            num_negative = int(self.patch_size * 0.3)
+            left_positive = self.patch_size - num_negative
+            positive_selected_idx = np.random.choice(positive_idx, size=left_positive, replace=False)
+            negative_selected_idx = np.random.choice(negative_idx, size=num_negative, replace=False)
+            selected_idx = np.concatenate((positive_selected_idx, negative_selected_idx))
         else:   # patch contains all positive_idx and some negative_idx
             num_negative = self.patch_size - num_positive # number of selected gingiva cells
             positive_selected_idx = np.random.choice(positive_idx, size=num_positive, replace=False)
@@ -114,15 +116,13 @@ class Mesh_Dataset(Dataset):
         X_train[:] = X[selected_idx, :]
         Y_train[:] = Y[selected_idx, :]
 
-        # output to visualize
-#        mesh2 = Easy_Mesh()
-#        mesh2.cells = X_train[:, 0:9]
-#        mesh2.update_cell_ids_and_points()
-#        mesh2.cell_attributes['Normal'] = X_train[:, 12:15]
-#        mesh2.cell_attributes['Label'] = Y_train
-#        mesh2.to_vtp('tmp.vtp')
-
-        D = distance_matrix(X_train[:, 9:12], X_train[:, 9:12])
+        if torch.cuda.is_available():
+            TX = torch.as_tensor(X_train[:, 9:12], device='cuda')
+            TD = torch.cdist(TX, TX)
+            D = TD.cpu().numpy()
+        else:
+            D = distance_matrix(X_train[:, 9:12], X_train[:, 9:12])
+ 
         S1[D<0.1] = 1.0
         S1 = S1 / np.dot(np.sum(S1, axis=1, keepdims=True), np.ones((1, self.patch_size)))
 
@@ -134,5 +134,16 @@ class Mesh_Dataset(Dataset):
 
         sample = {'cells': torch.from_numpy(X_train), 'labels': torch.from_numpy(Y_train),
                   'A_S': torch.from_numpy(S1), 'A_L': torch.from_numpy(S2)}
-
+        toct =  time.perf_counter()
+        print(f"mesh dataset preprocessing : {toct - tict:0.5f} seconds")
         return sample
+
+
+if __name__ == '__main__':
+    import os
+    num_classes = 17
+    data_folder = '/proj/MeshSegNet'
+    train_list = os.path.join(data_folder, 'train_list_1.csv') # use 1-fold as example
+    training_dataset = Mesh_Dataset(data_list_path=train_list, num_classes=num_classes, patch_size=6000)
+    for i in range(5):
+        y = training_dataset[i]
